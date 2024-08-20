@@ -1,0 +1,10 @@
+holoviews==1.19.1
+hvplot==0.10.0
+Mesa==2.3.2
+networkx==3.3
+numpy==1.26.4
+pandas==2.2.2
+panel==1.4.5
+param==2.1.1
+plotly==5.22.0
+scipy==1.14.0

@@ -1,0 +1,12 @@
+# dependencies
+/venv
+
+# data
+/data
+
+# misc
+.DS_Store
+.env
+**/__pycache__
+.vscode
+**/_*/

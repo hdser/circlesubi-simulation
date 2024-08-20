@@ -1,0 +1,7 @@
+num_runs: 3
+initial_agents: 10
+activation_fraction: 0.15
+steps: 100
+log_level: INFO
+output_dir: data
+output_filename: simulation2
