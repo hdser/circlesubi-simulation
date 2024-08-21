@@ -127,7 +127,8 @@ class SimulationDashboard(param.Parameterized):
         new_mint_value = 0
         for agent in self.model.schedule.agents:
             if isinstance(agent, HumanAgent):
-                for step, mint_info in agent.mints.items():
+                mints = self.model.hub_agent.get_mints(agent.unique_id)
+                for step, mint_info in mints.items():
                     if step == self.current_step:
                         new_mint_count += 1
                         new_mint_value += mint_info['issuance']
