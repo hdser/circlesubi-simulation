@@ -29,7 +29,9 @@ class BaseCirclesModel(Model):
                 "TotalAgents": lambda m: len(m.schedule.agents) - 1,  # Subtract 1 to exclude HubAgent
                 "TotalSupply": lambda m: m.hub_agent.get_total_supply(),
                 "AvgBalance": lambda m: m.hub_agent.get_avg_balance(),
-                "Gini": lambda m: m.hub_agent.calculate_gini()
+                "Gini": lambda m: m.hub_agent.calculate_gini(),
+                "TotalTransactions": lambda m: m.hub_agent.get_total_transactions(),
+                "TotalTransactionVolume": lambda m: m.hub_agent.get_total_transaction_volume()
             },
             agent_reporters={
                 "Balance": lambda a: a.model.hub_agent.get_balance(a.unique_id) if isinstance(a, HumanAgent) else None,
@@ -37,7 +39,8 @@ class BaseCirclesModel(Model):
                 "Supply": lambda a: a.model.hub_agent.get_supply(a.unique_id) if isinstance(a, HumanAgent) else None,
                 "Mints": lambda a: a.model.hub_agent.get_mints(a.unique_id) if isinstance(a, HumanAgent) else None,
                 "Traits": lambda a: a.model.hub_agent.get_traits(a.unique_id) if isinstance(a, HumanAgent) else None,
-                "Age": lambda a: (a.model.current_time - a.created_at) if isinstance(a, HumanAgent) else None
+                "Age": lambda a: (a.model.current_time - a.created_at) if isinstance(a, HumanAgent) else None,
+                "Transactions": lambda a: a.model.hub_agent.get_transactions(a.unique_id) if isinstance(a, HumanAgent) else None
             }
         )
 

@@ -32,6 +32,8 @@ class SimulationDashboard(param.Parameterized):
         self.update_logger()
         self.cumulative_mint_count = 0
         self.cumulative_mint_value = 0
+        self.cumulative_transaction_count = 0
+        self.cumulative_transaction_value = 0
 
     @param.depends('log_level', watch=True)
     def update_logger(self):
@@ -46,6 +48,7 @@ class SimulationDashboard(param.Parameterized):
         self.update_frequency = update_freq
         self.metrics_df = pd.DataFrame()
         self.mint_df = pd.DataFrame()
+        self.transaction_df = pd.DataFrame()
         self.is_running = True
         self.simulation_complete = False
 
@@ -59,6 +62,12 @@ class SimulationDashboard(param.Parameterized):
                 new_mint_data = self.calculate_mint_metrics()
                 new_mint_df = pd.DataFrame([new_mint_data])
                 self.mint_df = pd.concat([self.mint_df, new_mint_df], ignore_index=True)
+
+                # Collect transaction data
+                new_transaction_data = self.calculate_transaction_metrics()
+                new_transaction_df = pd.DataFrame([new_transaction_data])
+                self.transaction_df = pd.concat([self.transaction_df, new_transaction_df], ignore_index=True)
+                
                 
                 if self.current_step % self.update_frequency == 0 or self.current_step == self.max_steps:
                     human_agents_count = len([a for a in self.model.schedule.agents if isinstance(a, HumanAgent)])
@@ -152,6 +161,38 @@ class SimulationDashboard(param.Parameterized):
         
         return metrics
 
+    def calculate_transaction_metrics(self):
+        new_transaction_count = 0
+        new_transaction_value = 0
+        current_time = self.model.current_time
+        
+        for agent in self.model.schedule.agents:
+            if isinstance(agent, HumanAgent):
+                transactions = self.model.hub_agent.get_transactions(agent.unique_id)
+                for transaction in transactions:
+                    if transaction['time'] == current_time:
+                        new_transaction_count += 1
+                        new_transaction_value += transaction['amount']
+        
+        self.cumulative_transaction_count += new_transaction_count
+        self.cumulative_transaction_value += new_transaction_value
+        
+        # Convert the transaction value to a more manageable unit (e.g., standard tokens)
+        new_transaction_value_standard = new_transaction_value / 1e18
+        cumulative_transaction_value_standard = self.cumulative_transaction_value / 1e18
+
+        metrics = {
+            'Step': current_time,
+            'New Transaction Count': new_transaction_count,
+            'New Transaction Value': new_transaction_value_standard,
+            'Cumulative Transaction Count': self.cumulative_transaction_count,
+            'Cumulative Transaction Value': cumulative_transaction_value_standard
+        }
+        
+        self.logger.debug(f"Transaction metrics for step {current_time}: {metrics}")
+        
+        return metrics
+
     def create_mint_plot(self):
         self.logger.debug(f"Creating mint plot. mint_df shape: {self.mint_df.shape}")
         if self.mint_df.empty:
@@ -199,6 +240,54 @@ class SimulationDashboard(param.Parameterized):
             self.logger.error(f"Error creating mint plots: {str(e)}", exc_info=True)
             return (hv.Text(0, 0, f"Error: {str(e)}").opts(width=500, height=350),
                     hv.Text(0, 0, f"Error: {str(e)}").opts(width=500, height=350))
+
+
+    def create_transaction_plots(self):
+        self.logger.debug(f"Creating transaction plots. transaction_df shape: {self.transaction_df.shape}")
+        if self.transaction_df.empty:
+            self.logger.warning("Transaction DataFrame is empty")
+            return (hv.Text(0, 0, "No transaction data yet").opts(width=500, height=350),
+                    hv.Text(0, 0, "No transaction data yet").opts(width=500, height=350))
+        
+        self.logger.debug(f"Transaction DataFrame:\n{self.transaction_df}")
+        
+        try:
+            # Transaction Count Plot
+            new_transaction_count = hv.Bars(self.transaction_df, 'Step', 'New Transaction Count').opts(
+                color='purple', alpha=0.6, ylabel='New Transaction Count',
+                tools=['hover'], active_tools=[]
+            )
+            cumulative_transaction_count = hv.Curve(self.transaction_df, 'Step', 'Cumulative Transaction Count').opts(
+                color='magenta', ylabel='Cumulative Transaction Count'
+            )
+            
+            count_plot = (new_transaction_count * cumulative_transaction_count).opts(
+                opts.Overlay(width=500, height=350,
+                            xlabel='Step', legend_position='top_left',
+                            show_grid=True, multi_y=True),
+            ).opts(width=500, height=350, tools=['hover'], active_tools=[])
+
+            # Transaction Value Plot
+            new_transaction_value = hv.Bars(self.transaction_df, 'Step', 'New Transaction Value').opts(
+                color='teal', alpha=0.6, ylabel='New Transaction Value',
+                tools=['hover'], active_tools=[]
+            )
+            cumulative_transaction_value = hv.Curve(self.transaction_df, 'Step', 'Cumulative Transaction Value').opts(
+                color='cyan', ylabel='Cumulative Transaction Value'
+            )
+            
+            value_plot = (new_transaction_value * cumulative_transaction_value).opts(
+                opts.Overlay(width=500, height=350,
+                            xlabel='Step', legend_position='top_left',
+                            show_grid=True, multi_y=True),
+            ).opts(width=500, height=350, tools=['hover'], active_tools=[])
+
+            self.logger.debug("Dual-axis transaction plots created successfully")
+            return count_plot, value_plot
+        except Exception as e:
+            self.logger.error(f"Error creating transaction plots: {str(e)}", exc_info=True)
+            return (hv.Text(0, 0, f"Error: {str(e)}").opts(width=500, height=350),
+                    hv.Text(0, 0, f"Error: {str(e)}").opts(width=500, height=350))
         
 dashboard = SimulationDashboard()
 
@@ -231,7 +320,11 @@ def update_plots():
     mint_count_plot, mint_value_plot = dashboard.create_mint_plot()
     mint_count_plot_pane.object = mint_count_plot
     mint_value_plot_pane.object = mint_value_plot
-    dashboard.logger.debug("Plots updated successfully")
+
+    transaction_count_plot, transaction_value_plot = dashboard.create_transaction_plots()
+    transaction_count_plot_pane.object = transaction_count_plot
+    transaction_value_plot_pane.object = transaction_value_plot
+    dashboard.logger.debug("All plots updated successfully")
 
 def update_simulation():
     update_needed = False
@@ -308,6 +401,8 @@ adjacency_matrix_pane = pn.pane.HoloViews(sizing_mode='stretch_both')
 metrics_plot_pane = pn.pane.HoloViews(sizing_mode='stretch_both')
 mint_count_plot_pane = pn.pane.HoloViews(sizing_mode='stretch_both')
 mint_value_plot_pane = pn.pane.HoloViews(sizing_mode='stretch_both')
+transaction_count_plot_pane = pn.pane.HoloViews(sizing_mode='stretch_both')
+transaction_value_plot_pane = pn.pane.HoloViews(sizing_mode='stretch_both')
 empty_content = pn.Column(sizing_mode='stretch_both')
 
 # Add plots to the main area using GridSpec indexing
@@ -316,7 +411,9 @@ template.main[0:3, 5:10] = pn.Card(adjacency_matrix_pane, title='Adjacency Matri
 template.main[3:6, :] = pn.Card(metrics_plot_pane, title='Graph Metrics Over Time', sizing_mode='stretch_both')
 template.main[6:9, 0:5] = pn.Card(mint_count_plot_pane, title='Mint Count Over Time', sizing_mode='stretch_both')
 template.main[6:9, 5:10] = pn.Card(mint_value_plot_pane, title='Mint Value Over Time', sizing_mode='stretch_both')
-template.main[9:10, :] = empty_content
+template.main[9:12, 0:5] = pn.Card(transaction_count_plot_pane, title='Transaction Count Over Time', sizing_mode='stretch_both')
+template.main[9:12, 5:10] = pn.Card(transaction_value_plot_pane, title='Transaction Value Over Time', sizing_mode='stretch_both')
+template.main[12:14, :] = empty_content
 
 
 
