@@ -220,7 +220,7 @@ class Hub:
         days_passed = self.demurrage.day_since_day0(current_time) - self.demurrage.day_since_day0(last_supply_time)
         
         if days_passed > 0:
-            new_supply = self.circles.calculate_discounted_balance(last_supply, days_passed)
+            new_supply = self.demurrage.calculate_discounted_balance(last_supply, days_passed)
             self.avatars.supply[human_id][current_time] = new_supply
             return new_supply
         return last_supply

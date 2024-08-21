@@ -92,7 +92,7 @@ class SimulationDashboard(param.Parameterized):
         layout = nx.spring_layout(G_str)
         
         return hv.Graph.from_networkx(G_str, layout).opts(
-            directed=True, arrowhead_length=0.015,
+            directed=True, arrowhead_length=0.002,
             responsive=True, aspect=1, tools=['hover'], active_tools=[], node_size=4, edge_line_width=0.5
         )
 
@@ -212,12 +212,6 @@ real_time_toggle = pn.widgets.Checkbox(name="Update plots in real-time", value=T
 progress = pn.indicators.Progress(name="Progress", value=0, width=200)
 log_level_select = pn.widgets.Select(name="Log Level", options=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'], value='INFO')
 
-# Create plot panes
-#network_graph_pane = pn.pane.HoloViews(sizing_mode='stretch_both')
-#adjacency_matrix_pane = pn.pane.HoloViews(height=400)
-#metrics_plot_pane = pn.pane.HoloViews(height=400)
-#mint_count_plot_pane = pn.pane.HoloViews(height=400)
-#mint_value_plot_pane = pn.pane.HoloViews(height=400)
 
 def update_plots():
     dashboard.logger.debug(f"Updating plots. Current step: {dashboard.current_step}")

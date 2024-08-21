@@ -1,7 +1,9 @@
+from circlesUBI import Hub, HumanEnvironment
 from mesa import Agent
 import random
 import math
 from .logger import get_logger
+
 
 class HumanAgent(Agent):
     def __init__(self, unique_id, model, init_balance=50):
@@ -11,7 +13,7 @@ class HumanAgent(Agent):
         self.supply = 0
         self.balances = {}
         self.mints = {}
-        self.traits = self.model.hub.avatars.traits[self.unique_id]
+        self.traits = self.model.hub_agent.humans.traits[self.unique_id]
         self.created_at = self.traits['created_at']
 
         self.logger = get_logger(f"HumanAgent_{unique_id}")
@@ -48,7 +50,10 @@ class HumanAgent(Agent):
         
     def step(self):
         self.logger.debug(f"Agent {self.unique_id} stepping")
-        self.model.activated_agents_count += 1
+        try:
+            self.model.activated_agents_count += 1
+        except: 
+            pass
 
         try:
             self.transfer()
@@ -70,7 +75,7 @@ class HumanAgent(Agent):
             current_time = self.model.current_time
             invited_by = self.unique_id
 
-            self.model.hub.invite_human(current_time, new_human_id, invited_by)
+            self.model.hub_agent.invite_human(new_human_id, invited_by)
 
             if new_human_id in self.model.humans.traits:
                 new_agent = HumanAgent(new_human_id, self.model, init_balance=50)
@@ -90,8 +95,8 @@ class HumanAgent(Agent):
                     trust_value = 100
                     trust_duration = 1e9
 
-                    self.model.hub.establish_trusts(current_time, self.unique_id, trusted_agent.unique_id, trust_value, trust_duration)
-                    self.trusts = self.model.hub.avatars.trusts[self.unique_id]
+                    self.model.hub_agent.establish_trusts(self.unique_id, trusted_agent.unique_id, trust_value, trust_duration)
+                    self.trusts = self.model.hub_agent.humans.trusts[self.unique_id]
                     
                     self.model.G.add_edge(self.unique_id, trusted_agent.unique_id, weight=trust_value)
                     self.logger.debug(f"Agent {self.unique_id} established trust with agent {trusted_agent.unique_id}")
@@ -101,16 +106,16 @@ class HumanAgent(Agent):
 
     def mint(self):
         try:
-            issuance = self.model.hub.mint(self.unique_id, self.model.current_time)
-            self.mints = self.model.hub.avatars.mints[self.unique_id]
+            issuance = self.model.hub_agent.mint(self.unique_id)
+            self.mints = self.model.hub_agent.humans.mints[self.unique_id]
             self.logger.info(f"Agent {self.unique_id} minted {issuance} CRC")
         except Exception as e:
             self.logger.error(f"Error on Agent {self.unique_id} mint: {str(e)}")
 
     def transfer(self):
         try:
-            for sender_id in self.model.hub.avatars.trusts.keys():
-                new_sender_balance, new_receiver_balance = self.model.hub.transfer(sender_id, self.unique_id,1, self.model.current_time)
+            for sender_id in self.model.hub_agent.humans.trusts.keys():
+                self.model.hub_agent.transfer(sender_id, self.unique_id,1)
             #self.logger.debug(f"Agent {self.unique_id} transfered ")
         except Exception as e:
             self.logger.error(f"Error in transfer for Agent {self.unique_id}: {str(e)}")    
@@ -119,6 +124,8 @@ class HubAgent(Agent):
     def __init__(self, model):
         super().__init__("Hub", model)
         self.logger = get_logger("HubAgent")
+        self.humans = HumanEnvironment()
+        self.hub = Hub(self.humans)
         self.next_human_id = 0
 
     def step(self):
@@ -133,7 +140,7 @@ class HubAgent(Agent):
         try:
             new_human_id = self.get_next_human_id()
             current_time = self.model.current_time
-            self.model.hub.register_human(current_time, new_human_id)
+            self.hub.register_human(current_time, new_human_id)
             new_agent = HumanAgent(new_human_id, self.model, init_balance=450)
             self.model.schedule.add(new_agent)
             self.model.G.add_node(new_human_id)
@@ -144,3 +151,57 @@ class HubAgent(Agent):
     def get_next_human_id(self):
         self.next_human_id += 1
         return self.next_human_id
+
+    def mint(self, human_id):
+        try:
+            current_time = self.model.current_time
+            issuance = self.hub.mint(human_id, current_time)
+            self.logger.info(f"HubAgent minted {issuance} for human {human_id}")
+        except Exception as e:
+            self.logger.error(f"Error in mint for human {human_id}: {str(e)}")
+
+    def transfer(self, sender_id, receiver_id, amount):
+        try:
+            current_time = self.model.current_time
+            new_sender_balance, new_receiver_balance = self.hub.transfer(sender_id, receiver_id, amount, current_time)
+            self.logger.info(f"HubAgent transferred {amount} from human {sender_id} to human {receiver_id}")
+        except Exception as e:
+            self.logger.error(f"Error in transfer from {sender_id} to {receiver_id}: {str(e)}")
+
+    def establish_trusts(self, human_id, trusting_on_human_id, value=100, trust_duration=1e9):
+        try:
+            current_time = self.model.current_time
+            self.hub.establish_trusts(current_time, human_id, trusting_on_human_id, value, trust_duration)
+            self.logger.debug(f"HubAgent established trust between {human_id} and {trusting_on_human_id}")
+        except Exception as e:
+            self.logger.error(f"Error in establish_trusts between {human_id} and {trusting_on_human_id}: {str(e)}")
+
+    def invite_human(self, new_human_id, invited_by):
+        try:
+            current_time = self.model.current_time
+            self.hub.invite_human(current_time, new_human_id, invited_by)
+            self.logger.info(f"HubAgent invited new human {new_human_id}, invited by {inviter_id}")
+            return new_human_id
+        except Exception as e:
+            self.logger.error(f"Error in invite_human by {inviter_id}: {str(e)}")
+
+
+    def get_total_supply(self):
+        return sum(self.hub.avatars.supply[agent.unique_id][max(self.hub.avatars.supply[agent.unique_id].keys())]
+                   for agent in self.model.schedule.agents if isinstance(agent, HumanAgent))
+
+    def get_avg_balance(self):
+        balances = [self.hub.avatars.balance[agent.unique_id][agent.unique_id][max(self.hub.avatars.balance[agent.unique_id][agent.unique_id].keys())]
+                    for agent in self.model.schedule.agents if isinstance(agent, HumanAgent)]
+        return sum(balances) / len(balances) if balances else 0
+
+    def calculate_gini(self):
+        balances = [self.hub.avatars.balance[agent.unique_id][agent.unique_id][max(self.hub.avatars.balance[agent.unique_id][agent.unique_id].keys())]
+                    for agent in self.model.schedule.agents if isinstance(agent, HumanAgent)]
+        if not balances:
+            return 0
+        balances.sort()
+        n = len(balances)
+        index = [i / n for i in range(n)]
+        return 1 - 2 * sum(index[i] * balances[i] for i in range(n)) / sum(balances)
+

@@ -7,13 +7,10 @@ from datetime import datetime
 import networkx as nx
 import random
 import math
-from circlesUBI import Hub, HumanEnvironment
 
 from .agents import HumanAgent, HubAgent
 from .logger import get_logger
 import logging
-
-
 
 
 def count_trust_relationships(model):
@@ -41,10 +38,6 @@ class ControlledActivationScheduler(BaseScheduler):
         for agent in activated_agents:
             agent.step()
 
-        #activated_agents = random.sample(self.agents, activation_count)
-        #for agent in activated_agents:
-        #    agent.step()
-        
         self.model.activated_agents_count = activation_count
 
 class CirclesNetwork(Model):
@@ -52,13 +45,10 @@ class CirclesNetwork(Model):
         super().__init__()
         #self.schedule = RandomActivation(self)
         self.schedule = ControlledActivationScheduler(self)
-        self.humans = HumanEnvironment()
-        self.hub = Hub(self.humans)
         self.add_rate = 0.2
         self.invite_rate = 0.2
         self.establish_trust_rate = 0.1
         self.decay_half_life = decay_half_life
-        #self.current_time = int(datetime(2020, 1, 1).timestamp())
         self.current_time = 0
         self.G = nx.DiGraph()
         
@@ -76,8 +66,6 @@ class CirclesNetwork(Model):
         # Create initial human agents
         for _ in range(initial_agents):
             self.hub_agent.register_new_human()
-        #for _ in range(initial_agents):
-        #    self.add_initial_agent()
 
         self.datacollector = DataCollector(
             model_reporters={
@@ -103,7 +91,7 @@ class CirclesNetwork(Model):
     def add_initial_agent(self):
         try:
             new_human_id = self.next_id()
-            self.hub.register_human(self.current_time, new_human_id)
+            self.hub_agent.register_human(self.current_time, new_human_id)
             new_agent = HumanAgent(new_human_id, self, init_balance=50)
             self.schedule.add(new_agent)
             self.G.add_node(new_human_id)
@@ -146,36 +134,90 @@ class CirclesNetwork(Model):
         return self.schedule.get_agent_count()
 
 
-class CirclesNetworkGrid(CirclesNetwork):
-    """ A model with some number of agents. """
-    def __init__(self, add_rate=0.02, invite_rate=0.02, initial_agents=1):
+class CirclesStaticNetwork(Model):
+    def __init__(self, num_agents=100, avg_node_degree=3, mint_probability=0.1, transfer_probability=0.05, log_level='INFO'):
         super().__init__()
-        self.G = nx.DiGraph()
-        self.G.add_nodes_from(range(0, 1000))
-        self.grid = NetworkGrid(self.G)
+        self.num_agents = num_agents
+        self.avg_node_degree = avg_node_degree
+        self.mint_probability = mint_probability
+        self.transfer_probability = transfer_probability
+        self.schedule = RandomActivation(self)
+        self.current_time = 0
+        self.G = nx.erdos_renyi_graph(n=num_agents, p=avg_node_degree/(num_agents-1), directed=True)
+        
+        self.log_level = log_level
+        self.logger = get_logger("CirclesStaticNetwork", getattr(logging, self.log_level))
 
 
-""" 
-# Example of running the model
-model = CirclesNetwork(initial_agents=0)  
-#print(model.hub.avatars)
-for i in range(150):  # Run the model for 10 steps
-    model.step()
-    print(f"Step {i} completed")
+        # Create HubAgent
+        self.hub_agent = HubAgent(self)
+        #self.schedule.add(self.hub_agent)
 
-df = model.datacollector.get_model_vars_dataframe()
+        # Create and add HumanAgents
+        for i in range(num_agents):
+            self.hub_agent.register_new_human()
 
-G = df.iloc[149]['Network']
-print(G)
-plot_adjacency_matrix(G)
-#for agent in model.schedule.agents:
-#    print(f"Agent ID: {agent.unique_id}, Balance: {agent.balance}, Trusts: {agent.trusts}")
-print(model.datacollector.get_model_vars_dataframe())
-#print(model.datacollector.get_agent_vars_dataframe())
+        # Establish trust relationships based on the generated graph
+        for edge in self.G.edges():
+            self.hub_agent.establish_trusts(edge[0], edge[1], value=random.randint(50, 150))
 
-#agent_data = model.datacollector.get_agent_vars_dataframe()
-#last_state_per_agent = agent_data.groupby(level="AgentID").last()
+        self.datacollector = DataCollector(
+            model_reporters={
+                "TotalTrusts": self.count_trust_relationships,
+                "TotalSupply": self.get_total_supply,
+                "AvgBalance": self.get_avg_balance,
+                "Gini": self.calculate_gini,
+                "ActiveAgents": lambda m: m.schedule.get_agent_count() - 1,  # Exclude HubAgent
+            },
+            agent_reporters={
+                "Balance": lambda a: a.balance if isinstance(a, HumanAgent) else None,
+                "Supply": lambda a: a.supply if isinstance(a, HumanAgent) else None,
+            }
+        )
 
-#print(last_state_per_agent['Trusts'].apply(lambda x: list(x.keys()) if isinstance(x, dict) else []))
+    def step(self):
+        self.current_time += 1
+        self.logger.info(f"Step start: {self.current_time}")
+        
+        try:
+            self.schedule.step()
+            self.perform_mints()
+            self.perform_transfers()
+            self.datacollector.collect(self)
+        except Exception as e:
+            self.logger.error(f"Error during model step: {str(e)}")
+        
+        self.logger.info(f"Step end: {self.current_time}")
 
-"""
+    def perform_mints(self):
+        for agent in self.schedule.agents:
+            if isinstance(agent, HumanAgent) and random.random() < self.mint_probability:
+                try:
+                    self.hub_agent.mint(agent.unique_id)
+                except Exception as e:
+                    self.logger.error(f"Error minting for agent {agent.unique_id}: {str(e)}")
+
+    def perform_transfers(self):
+        for agent in self.schedule.agents:
+            if isinstance(agent, HumanAgent) and random.random() < self.transfer_probability:
+                try:
+                    neighbors = list(self.G.neighbors(agent.unique_id))
+                    if neighbors:
+                        receiver = random.choice(neighbors)
+                        amount = random.randint(1, 10) * (10 ** 18)  # Random amount between 1 and 10 tokens
+                        self.hub_agent.transfer(agent.unique_id, receiver, amount)
+                except Exception as e:
+                    self.logger.error(f"Error in transfer for agent {agent.unique_id}: {str(e)}")
+
+    def count_trust_relationships(self):
+        return self.G.number_of_edges()
+
+    def get_total_supply(self):
+        return self.hub_agent.get_total_supply()
+
+    def get_avg_balance(self):
+        return self.hub_agent.get_avg_balance()
+
+    def calculate_gini(self):
+        return self.hub_agent.calculate_gini()
+
