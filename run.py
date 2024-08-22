@@ -27,12 +27,14 @@ def run_simulation(config, run_number):
             log_level=config.get('log_level', 'INFO')
         )
     elif model_type == 'CirclesStaticNetwork':
+        graph_config = config.get('graph_config')
         model = CirclesStaticNetwork(
             num_agents=config.get('num_agents', 100),
             avg_node_degree=config.get('avg_node_degree', 3),
             mint_probability=config.get('mint_probability', 0.1),
             transfer_probability=config.get('transfer_probability', 0.05),
-            log_level=config.get('log_level', 'INFO')
+            log_level=config.get('log_level', 'INFO'),
+            graph_config=graph_config
         )
     else:
         raise ValueError(f"Unknown model type: {model_type}")
