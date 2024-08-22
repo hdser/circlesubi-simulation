@@ -1,0 +1,42 @@
+model_type: CirclesStaticNetwork
+num_agents: 5
+steps: 100
+num_runs: 3
+log_level: INFO
+mint_probability: 0.1
+transfer_probability: 0.05
+output_dir: data
+output_filename: fix
+graph_config:
+  nodes:
+    0:
+      traits:
+        sociability: 0.5
+        influence: 0.7
+        evilness: 0.2
+    1: 
+      traits:
+        sociability: 0.5
+        influence: 0.7
+        evilness: 0.2
+    2: 
+      traits:
+        sociability: 0.5
+        influence: 0.7
+        evilness: 0.2
+    3: 
+      traits:
+        sociability: 0.5
+        influence: 0.7
+        evilness: 0.2
+    4: 
+      traits:
+        sociability: 0.5
+        influence: 0.7
+        evilness: 0.2
+  edges:
+    - {source: 0, target: 1, trust: 100}
+    - {source: 1, target: 2, trust: 75}
+    - {source: 2, target: 3, trust: 90}
+    - {source: 3, target: 4, trust: 80}
+    - {source: 4, target: 0, trust: 95}

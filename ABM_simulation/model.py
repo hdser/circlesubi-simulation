@@ -115,22 +115,40 @@ class CirclesNetwork(BaseCirclesModel):
                     self.G.add_edge(str(agent.unique_id), str(trusted_id))
 
 class CirclesStaticNetwork(BaseCirclesModel):
-    def __init__(self, num_agents=100, avg_node_degree=3, mint_probability=0.1, transfer_probability=0.05, log_level='INFO'):
+    def __init__(self, num_agents=100, avg_node_degree=3, mint_probability=0.1, transfer_probability=0.05, log_level='INFO',graph_config=None):
         super().__init__(log_level)
         self.num_agents = num_agents
         self.avg_node_degree = avg_node_degree
         self.mint_probability = mint_probability
         self.transfer_probability = transfer_probability
         self.schedule = RandomActivation(self)
-        self.G = nx.erdos_renyi_graph(n=num_agents, p=avg_node_degree/(num_agents-1), directed=True)
 
-        # Create and add HumanAgents
-        for i in range(num_agents):
+        if graph_config:
+            self.initialize_from_config(graph_config)
+        else:
+            self.initialize_random_graph()
+
+
+    def initialize_random_graph(self):
+        self.G = nx.erdos_renyi_graph(n=self.num_agents, p=self.avg_node_degree/(self.num_agents-1), directed=True)
+        for i in range(self.num_agents):
             self.hub_agent.register_new_human()
-
-        # Establish trust relationships based on the generated graph
         for edge in self.G.edges():
             self.hub_agent.establish_trusts(edge[0], edge[1], value=random.randint(50, 150))
+
+    def initialize_from_config(self, graph_config):
+        self.G = nx.DiGraph()
+        for node, data in graph_config['nodes'].items():
+            self.G.add_node(node)
+            new_agent = self.hub_agent.register_new_human()
+            # Set agent traits if specified
+            if 'traits' in data:
+                self.hub_agent.humans.traits[new_agent] = data['traits']
+
+        for edge in graph_config['edges']:
+            self.G.add_edge(edge['source'], edge['target'])
+            self.hub_agent.establish_trusts(edge['source'], edge['target'], value=edge.get('trust', 100))
+
 
     def step(self):
         super().step()

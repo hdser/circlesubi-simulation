@@ -25,6 +25,9 @@ class PathFinder:
             trust_amount = self.hub_agent.get_trust_amount(truster, trustee)
             balance = self.hub_agent.get_currency_balance(trustee, trustee)
             max_amount = min(max_amount, trust_amount, balance)
+            if max_amount < amount:
+                break
+
         return max_amount
 
     def find_optimal_transfer_path(self, source, target, amount):
