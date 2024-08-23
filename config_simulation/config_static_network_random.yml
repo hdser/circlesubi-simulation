@@ -3,7 +3,7 @@ num_agents: 100
 avg_node_degree: 3
 mint_probability: 0.1
 transfer_probability: 0.05
-steps: 100
+steps: 200
 num_runs: 3
 log_level: INFO
 output_dir: data

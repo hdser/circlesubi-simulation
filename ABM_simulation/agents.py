@@ -15,6 +15,8 @@ class HubAgent(Agent):
         self.hub = Hub(self.humans)
         self.next_human_id = 0
         self.transactions = {} 
+        self.total_mints = 0 
+        self.total_mint_volume = 0
         self.path_finder = PathFinder(self.model.G, self)
 
     def step(self):
@@ -63,6 +65,9 @@ class HubAgent(Agent):
         try:
             current_time = self.model.current_time
             issuance = self.hub.mint(human_id, current_time)
+            if issuance:
+                self.total_mints += 1
+                self.total_mint_volume += issuance
             self.logger.info(f"HubAgent minted {issuance} for human {human_id}")
             return issuance
         except Exception as e:
@@ -164,6 +169,13 @@ class HubAgent(Agent):
             for transactions in self.transactions.values()
             for transaction in transactions
         )
+
+    def get_total_mints(self):
+        return self.total_mints
+
+    def get_total_mint_volume(self):
+        return self.total_mint_volume
+
 
     def get_total_supply(self):
         return sum(self.humans.supply[agent_id][max(self.humans.supply[agent_id].keys())]

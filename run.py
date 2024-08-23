@@ -49,7 +49,12 @@ def run_simulation(config, run_number):
             logger.info(f"Completed step {i + 1}")
 
     model_data = model.datacollector.get_model_vars_dataframe()
+    model_data.index.name = 'Step'
+    model_data = model_data.reset_index()
+    
     agent_data = model.datacollector.get_agent_vars_dataframe()
+    agent_data = agent_data.reset_index()
+    agent_data = agent_data.rename(columns={'AgentID': 'Step'})
     
     return model_data, agent_data, graph_data
 
@@ -63,13 +68,13 @@ def save_data(model_data, agent_data, graph_data, config, run_number, timestamp)
     # Save model-level data
     model_filename = f"{base_filename}_{model_type}_model_run{run_number}_{timestamp}.csv"
     model_full_path = os.path.join(output_dir, model_filename)
-    model_data.to_csv(model_full_path, index=True)
+    model_data.to_csv(model_full_path, index=False)
     print(f"Model data for run {run_number} saved to {model_full_path}")
     
     # Save agent-level data
     agent_filename = f"{base_filename}_{model_type}_agents_run{run_number}_{timestamp}.csv"
     agent_full_path = os.path.join(output_dir, agent_filename)
-    agent_data.to_csv(agent_full_path, index=True)
+    agent_data.to_csv(agent_full_path, index=False)
     print(f"Agent data for run {run_number} saved to {agent_full_path}")
 
     # Save graph data
@@ -104,15 +109,24 @@ def run_multiple_simulations(config):
     
     # Calculate summary statistics for numeric columns only
     numeric_columns = combined_model_data.select_dtypes(include=[np.number]).columns
-    mean_model_data = combined_model_data[numeric_columns].groupby(level=1).mean()
-    std_model_data = combined_model_data[numeric_columns].groupby(level=1).std()
+    numeric_columns = [col for col in numeric_columns if col != 'Step']
+    
+    mean_model_data = combined_model_data.groupby('Step')[numeric_columns].mean()
+    std_model_data = combined_model_data.groupby('Step')[numeric_columns].std()
+    
+    # Rename columns to include _mean and _std suffixes
+    mean_model_data.columns = [f"{col}_mean" for col in mean_model_data.columns]
+    std_model_data.columns = [f"{col}_std" for col in std_model_data.columns]
+    
+    # Combine mean and std data
+    summary_data = pd.concat([mean_model_data, std_model_data], axis=1)
+    summary_data = summary_data.reset_index()
     
     # Save summary statistics
     model_type = config.get('model_type', 'CirclesNetwork')
     summary_filename = f"{config.get('output_filename', 'simulation_results')}_{model_type}_summary_{timestamp}.csv"
     summary_full_path = os.path.join(config.get('output_dir', 'data'), summary_filename)
-    summary_data = pd.concat([mean_model_data, std_model_data], axis=1, keys=['mean', 'std'])
-    summary_data.to_csv(summary_full_path)
+    summary_data.to_csv(summary_full_path, index=False)
     print(f"Summary statistics saved to {summary_full_path}")
 
 def main():

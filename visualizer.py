@@ -2,6 +2,7 @@ import panel as pn
 import param
 import pandas as pd
 import holoviews as hv
+from holoviews import opts
 import networkx as nx
 import json
 import os
@@ -41,17 +42,33 @@ class SimulationVisualizer(param.Parameterized):
         
         return pn.Column(
             summary_plot,
-            pn.Spacer(height=20), 
+            pn.Spacer(height=20),
             pn.Row(
-                run_plots['model'],
+                run_plots['network_graph'],
                 pn.Spacer(width=20),
-                run_plots['agent'],
+                run_plots['adjacency_matrix'],
                 sizing_mode='stretch_width'
             ),
-            pn.Spacer(height=20), 
-            run_plots['graph'],
-            pn.Spacer(height=20), 
-            pn.Row(pn.Spacer(height=200),sizing_mode='stretch_width'),
+            pn.Spacer(height=20),
+            run_plots['metrics'],
+            pn.Spacer(height=20),
+            pn.Row(
+                run_plots['mint_count'],
+                pn.Spacer(width=20),
+                run_plots['mint_value'],
+                sizing_mode='stretch_width'
+            ),
+            pn.Spacer(height=20),
+            pn.Row(
+                run_plots['transaction_count'],
+                pn.Spacer(width=20),
+                run_plots['transaction_value'],
+                sizing_mode='stretch_width'
+            ),
+            pn.Spacer(height=20),
+            run_plots['agent_scatter'],
+            pn.Spacer(height=20),
+            pn.Row(pn.Spacer(height=200), sizing_mode='stretch_width'),
             sizing_mode='stretch_width'
         )
         
@@ -128,6 +145,15 @@ class SimulationVisualizer(param.Parameterized):
             summary_file = next(Path(self.simulation_dir).glob(f"{sim_name}_summary_*.csv"))
             
             self.summary_data = pd.read_csv(summary_file)
+
+            # Convert all columns except 'Step' to float
+            for column in self.summary_data.columns:
+                if column != 'Step':
+                    self.summary_data[column] = pd.to_numeric(self.summary_data[column], errors='coerce')
+            
+            # Convert 'Step' to integer (assuming it's a step or index column)
+            self.summary_data['Step'] = pd.to_numeric(self.summary_data['Step'], errors='coerce').astype('Int64')
+            
             logger.debug(f"Loaded summary data with columns: {self.summary_data.columns}")
 
     def update_run_options(self):
@@ -163,6 +189,11 @@ class SimulationVisualizer(param.Parameterized):
                 'agent': pd.read_csv(agent_file),
                 'graph': json.load(open(graph_file, 'r'))
             }
+
+            # Add AgentID column to agent data if it doesn't exist
+            if 'AgentID' not in self.run_data['agent'].columns:
+                self.run_data['agent']['AgentID'] = self.run_data['agent'].groupby('Step').cumcount()
+            
             
             logger.debug(f"Loaded run data for run {self.selected_run}")
     
@@ -171,14 +202,14 @@ class SimulationVisualizer(param.Parameterized):
             logger.error("Summary data not loaded")
             return pn.pane.Markdown("No summary data available.")
 
-        mean_columns = [col for col in self.summary_data.columns if col.startswith('mean')]
+        mean_columns = [col for col in self.summary_data.columns if col.endswith('_mean')]
 
         if not mean_columns:
             logger.warning("No mean columns found in summary data")
             return pn.pane.Markdown("No relevant data found in the summary.")
 
         plot = self.summary_data.hvplot.line(
-            x='Unnamed: 0', y=mean_columns,
+            x='Step', y=mean_columns,
             width=None,
             height=400,
             responsive=True,
@@ -195,71 +226,137 @@ class SimulationVisualizer(param.Parameterized):
             sizing_mode='stretch_width'
         )
 
+    def process_data(self, data_type, columns):
+        """
+        Generic method to process data for visualization.
+        
+        :param data_type: Type of data (e.g., 'mint', 'transaction')
+        :param columns: List of column names [step, cumulative_count, cumulative_value]
+        :return: Processed DataFrame
+        """
+        if 'model' not in self.run_data or self.run_data['model'] is None:
+            logger.error(f"{data_type.capitalize()} data not found in run_data")
+            return pd.DataFrame()
+
+        step, cumulative_count, cumulative_value = columns
+        data = self.run_data['model'][[step, cumulative_count, cumulative_value]].copy()
+        data.columns = ['Step', f'Cumulative {data_type.capitalize()} Count', f'Cumulative {data_type.capitalize()} Value']
+
+        # Convert columns to numeric, replacing any non-numeric values with NaN
+        for col in data.columns[1:]:
+            data[col] = pd.to_numeric(data[col], errors='coerce')
+
+        # Calculate the differences and fill NaN with 0
+        data[f'New {data_type.capitalize()} Count'] = data[f'Cumulative {data_type.capitalize()} Count'].diff().fillna(data[f'Cumulative {data_type.capitalize()} Count'])
+        data[f'New {data_type.capitalize()} Value'] = data[f'Cumulative {data_type.capitalize()} Value'].diff().fillna(data[f'Cumulative {data_type.capitalize()} Value'])
+
+        return data
+
+    def process_mint_data(self):
+        return self.process_data('mint', ['Step', 'TotalMints', 'TotalMintVolume'])
+
+    def process_transaction_data(self):
+        return self.process_data('transaction', ['Step', 'TotalTransactions', 'TotalTransactionVolume'])
+
+
     def create_run_plots(self):
         if self.run_data is None:
             logger.error("Run data not loaded")
-            return {'model': pn.pane.Markdown("No run data available."),
-                    'agent': pn.pane.Markdown("No run data available."),
-                    'graph': pn.pane.Markdown("No run data available.")}
+            return {"error": pn.pane.Markdown("No run data available.")}
 
-        model_columns = [col for col in self.run_data['model'].columns if col not in ['Unnamed: 0', 'Network']]
+        plots = {}
+        
+        # Network Graph and Adjacency Matrix
+        plots['network_graph'] = self.create_single_plot('network_graph', self.create_network_graph, "Network Graph")
+        plots['adjacency_matrix'] = self.create_single_plot('adjacency_matrix', self.create_adjacency_matrix, "Adjacency Matrix")
+        
+        # Metrics Plot
+        plots['metrics'] = self.create_single_plot('metrics', self.create_metrics_plot, "Model Metrics")
+        
+        # Mint Plots
+        mint_data = self.process_mint_data()
+        plots['mint_count'] = self.create_dual_axis_plot('mint_count', mint_data, 'New Mint Count', 'Cumulative Mint Count', "Mint Count")
+        plots['mint_value'] = self.create_dual_axis_plot('mint_value', mint_data, 'New Mint Value', 'Cumulative Mint Value', "Mint Value")
+        
+        # Transaction Plots
+        transaction_data = self.process_transaction_data()
+        plots['transaction_count'] = self.create_dual_axis_plot('transaction_count', transaction_data, 'New Transaction Count', 'Cumulative Transaction Count', "Transaction Count")
+        plots['transaction_value'] = self.create_dual_axis_plot('transaction_value', transaction_data, 'New Transaction Value', 'Cumulative Transaction Value', "Transaction Value")
+        
+        # Agent Scatter Plot
+        plots['agent_scatter'] = self.create_single_plot('agent_scatter', self.create_agent_scatter_plot, "Agent Balance vs Supply")
 
-        model_plot = self.run_data['model'].hvplot.line(
-            x='Unnamed: 0', y=model_columns,
-            width=None,
-            height=350,
-            responsive=True,
-            legend='top'
-        ).opts(
-            tools=['hover'],
-            active_tools=[],
-            fontscale=1,
-            ylim=(0, None)
-        )
-        
-        agent_plot = self.run_data['agent'].hvplot.scatter(
-            x='Balance', y='Supply', by='AgentID',
-            width=None,
-            height=350,
-            responsive=True,
-            legend='top'
-        ).opts(
-            tools=['hover'],
-            active_tools=['pan', 'wheel_zoom'],
-            fontscale=1,
-            ylim=(0, None)
-        )
-        
+        return plots
+
+    def create_single_plot(self, plot_name, plot_function, title):
         try:
-            last_graph = nx.node_link_graph(self.run_data['graph'][-1])
-            last_graph = nx.relabel_nodes(last_graph, {n: str(n) for n in last_graph.nodes()})
-            layout = nx.spring_layout(last_graph)
-            
-            graph_plot = hv.Graph.from_networkx(last_graph, layout).opts(
-                width=None,
-                height=400,
-                tools=['hover'],
-                active_tools=[],
-                node_size=10,
-                edge_line_width=0.5,
-                xaxis=None,
-                yaxis=None
+            plot = plot_function()
+            return pn.Card(
+                pn.pane.HoloViews(plot, sizing_mode='stretch_width', height=400),
+                title=f"{title} (Run: {self.selected_run})",
+                sizing_mode='stretch_width'
             )
         except Exception as e:
-            logger.error(f"Error creating graph plot: {str(e)}")
-            graph_plot = pn.pane.Markdown("Error creating graph plot")
-        
-        return {
-            'model': pn.Card(pn.pane.HoloViews(model_plot, sizing_mode='stretch_width', height=400),
-                             title=f"Model Metrics (Run: {self.selected_run})",
-                             sizing_mode='stretch_width'),
-            'agent': pn.Card(pn.pane.HoloViews(agent_plot, sizing_mode='stretch_width', height=400),
-                             title=f"Agent Balance vs Supply (Run: {self.selected_run})",
-                             sizing_mode='stretch_width'),
-            'graph': pn.Card(pn.pane.HoloViews(graph_plot, sizing_mode='stretch_width', height=450),
-                             title=f"Final Network State (Run: {self.selected_run})",
-                             sizing_mode='stretch_width')
-        }
+            logger.error(f"Error creating {plot_name}: {str(e)}")
+            return pn.pane.Markdown(f"Error creating {plot_name}: {str(e)}")
+
+    def create_dual_axis_plot(self, plot_name, data, bar_column, line_column, title):
+        try:
+            bar_plot = data.hvplot.bar(
+                x='Step', y=bar_column, color='blue', alpha=0.6
+            ).opts(ylabel=bar_column, tools=['hover'], active_tools=[])
+            
+            line_plot = data.hvplot.line(
+                x='Step', y=line_column, color='red'
+            ).opts(ylabel=line_column)
+            
+            combined_plot = (bar_plot * line_plot).opts(
+                opts.Overlay(responsive=True, aspect=1, xlabel='Step', 
+                             legend_position='top_left', show_grid=True, multi_y=True)
+            )
+            
+            return pn.Card(
+                pn.pane.HoloViews(combined_plot, sizing_mode='stretch_width', height=400),
+                title=f"{title} (Run: {self.selected_run})",
+                sizing_mode='stretch_width'
+            )
+        except Exception as e:
+            logger.error(f"Error creating {plot_name}: {str(e)}")
+            return pn.pane.Markdown(f"Error creating {plot_name}: {str(e)}")
+
+    def create_network_graph(self):
+        last_graph = nx.node_link_graph(self.run_data['graph'][-1])
+        last_graph = nx.relabel_nodes(last_graph, {n: str(n) for n in last_graph.nodes()})
+        layout = nx.spring_layout(last_graph)
+        return hv.Graph.from_networkx(last_graph, layout).opts(
+            width=None, height=400, tools=['hover'], active_tools=[],
+            node_size=10, edge_line_width=0.5, xaxis=None, yaxis=None,
+            responsive=True
+        )
+
+    def create_adjacency_matrix(self):
+        last_graph = nx.node_link_graph(self.run_data['graph'][-1])
+        adjacency_matrix = nx.adjacency_matrix(last_graph).todense()
+        return hv.Image(adjacency_matrix).opts(
+            width=None, height=400, cmap='viridis',
+            tools=['hover'], active_tools=[], colorbar=True,
+            responsive=True
+        )
+
+    def create_metrics_plot(self):
+        model_columns = [col for col in self.run_data['model'].columns if col not in ['Step', 'Network']]
+        return self.run_data['model'].hvplot.line(
+            x='Step', y=model_columns, width=None, height=350,
+            legend='top'
+        ).opts(
+            tools=['hover'], active_tools=[], fontscale=1, ylim=(0, None)
+        )
+
+    def create_agent_scatter_plot(self):
+        return self.run_data['agent'].hvplot.scatter(
+            x='Balance', y='Supply', by='AgentID', width=800, height=400,
+            title="Agent Balance vs Supply"
+        ).opts(tools=['hover'], active_tools=['pan', 'wheel_zoom'])
 
 # Create the Panel application
 visualizer = SimulationVisualizer()
